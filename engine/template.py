@@ -1,9 +1,8 @@
 import re
 import os
+import functools
 import html
-from collections import namedtuple
 strictness = True
-ForTag = namedtuple('ForTag', ['iterator', 'iterable', 'child_group'])
 tokenising_expression = re.compile(r'(?:\{(?=%|\{))(.*?)(?:%|\})\}')
 for_tokenising = re.compile(r'% for (.*) in (.*)')
 if_tokenising = re.compile(r'% if (.*)')
@@ -12,6 +11,13 @@ if_tokenising = re.compile(r'% if (.*)')
 class ParseError(Exception):
     def __init__(self, msg):
         return super().__init__(msg)
+
+
+def html_escape(func):
+    @functools.wraps(func)
+    def inner(*args, **kwargs):
+        return html.escape(func(*args, **kwargs))
+    return inner
 
 
 class Node:
@@ -29,13 +35,14 @@ class TextNode(Node):
 
 
 class PythonNode(Node):
+    @html_escape
     def evaluate(self, context):
         try:
-            return html.escape(str(eval(self.content, {}, context)))
+            return str(eval(self.content, {}, context))
         except NameError:
             if not strictness:
                 return '{{}}'
-            return html.escape(str(eval(self.content, {}, context)))
+            return str(eval(self.content, {}, context))
 
 
 class SafePythonNode(Node):
@@ -46,6 +53,7 @@ class SafePythonNode(Node):
             if not strictness:
                 return '{{}}'
             return str(eval(self.content, {}, context))
+
 
 class IncludeNode(Node):
     def evaluate(self, context):
@@ -71,7 +79,6 @@ class ForNode(Node):
         iterable = eval(self.iterable, {}, context)
         if len(iterable) == 0 and self.empty_group is not None:
             return self.empty_group.evaluate(context)
-
 
         for_list = []
         for item in iterable:
@@ -124,10 +131,6 @@ class GroupNode(Node):
         return ''.join(str(i) for i in group_list)
 
 
-def _tokenise(template):
-    return re.split(tokenising_expression, template)
-
-
 def _notFinished(parent, lookingAt, template):
     if lookingAt >= len(template):
         return False
@@ -146,6 +149,10 @@ def _notFinished(parent, lookingAt, template):
         if lookingAt == '% end comment ':
             return False
     return True
+
+
+def _tokenise(template):
+    return re.split(tokenising_expression, template)
 
 
 def _parse_template(template, upto, parent):
@@ -222,7 +229,3 @@ def render_file(filename, context, *, strict=False):  # TODO: strict=None
 
     finally:
         os.chdir(cur_directory)
-
-if __name__ == '__main__':
-    render_file('test.html', {'person': 0, 'title':1, 'age':2})
-    print(render_template("""{{ a }} {% include test.html %} {{ title }}""", {'person': 0, 'title':1, 'age':2}))
